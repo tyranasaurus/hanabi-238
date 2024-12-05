@@ -31,50 +31,67 @@ class QLearningAgent:
         observation_id = self.observation_to_id(observation)
         return self.Q.get((observation_id, action_id), 0.0)
 
-    def update_q(self, observation, action, reward, next_observation, next_action):
+    def update_q(self, observation, action, reward, next_observation):
         # Update Q-value using Q-learning formula
         action_id = action
-        next_action_id = self.action_to_id(next_action)
+         # Exploit: choose the action with the highest Q-value for the current observation  
+        action_q_values = [self.get_q(observation, a) for a in observation['player_observations'][observation['current_player']]['legal_moves_as_int']]
+        next_action_id = observation['player_observations'][observation['current_player']]['legal_moves_as_int'][int(np.argmax(action_q_values))]
         observation_id = self.observation_to_id(observation)
+
         current_q = self.get_q(observation, action)
-        next_q = self.get_q(next_observation, next_action)
+        next_q = self.get_q(next_observation, next_action_id)
+
         new_q = current_q + self.alpha * (reward + self.gamma * next_q - current_q)
+
         self.Q[(observation_id, action_id)] = new_q
 
     def select_action(self, observation):
         # Epsilon-greedy policy: explore or exploit
         if random.random() < self.epsilon:
-            print(observation['player_observations'][observation['current_player']]['legal_moves_as_int'])
-            return random.choice(observation['player_observations'][observation['current_player']]['legal_moves_as_int'])  # Exploration
+            #print(observation['player_observations'][observation['current_player']]['legal_moves_as_int'])
+            return random.randint(0, len(observation['player_observations'][observation['current_player']]['legal_moves_as_int']) - 1)  # Exploration
         else:
             # Exploit: choose the action with the highest Q-value for the current observation
             action_q_values = [self.get_q(observation, a) for a in observation['player_observations'][observation['current_player']]['legal_moves_as_int']]
             #print(type(np.argmax(action_q_values)))
-            return int(np.argmax(action_q_values))  # Exploitation
+            return int(np.argmax(action_q_values)) 
+
 
 def train_agent(environment, agent, n_episodes=1000):
+    max_reward = 0
     for episode in range(n_episodes):
         # Reset the environment and initialize variables for this episode
         observation = environment.reset()  # Initial observation
         total_reward = 0
         done = False
-
+        #max_reward = 0
         while not done:
-            print(observation['player_observations'])
-            action = agent.select_action(observation)
-            print(action)            
+            #print(observation['player_observations'])
+            action_index = agent.select_action(observation)
+            cur_player_index = observation["current_player"]
+            action = observation["player_observations"][cur_player_index]["legal_moves"][action_index]
+            #print(action)
+
             # Apply action to the environment and get next observation, reward, and done signal
             next_observation, reward, done, _ = environment.step(action)
-            
+            #print("updating Q!")  
+            #print("---------------reward-------------------")          
+            #print()
             # Update Q-table based on the agent's experience
-            agent.update_q(observation, action, reward, next_observation, action)
-            
+            # next_action should be the action with the highest action_q_values from the legal_moves
+            # implement it in update_q
+
+            agent.update_q(observation, action_index, reward, next_observation)
+            #print("Q update finished")
+            print(agent.Q)
             # Move to the next state
             observation = next_observation
             total_reward += reward
-        
+        if max_reward < total_reward:
+            max_reward = total_reward         
         print(f"Episode {episode+1}/{n_episodes}, Total Reward: {total_reward}")
-
+    print(max_reward)
 
 def evaluate_agent(environment, agent, n_episodes=100):
     total_rewards = 0
@@ -100,7 +117,7 @@ if __name__ == "__main__":
 	environment = rl_env.make('Hanabi-Full')
 	# initial_state = environment.reset()
 	agent = QLearningAgent()
-	train_agent(environment, agent, n_episodes=1000)
+	train_agent(environment, agent, n_episodes=10000)
 	evaluate_agent(environment, agent, n_episodes=100)
 
 
