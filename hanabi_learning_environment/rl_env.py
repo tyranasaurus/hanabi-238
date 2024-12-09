@@ -350,6 +350,7 @@ class HanabiEnv(Environment):
       raise ValueError("Expected action as dict or int, got: {}".format(
           action))
 
+    old_observation = self._make_observation_all_players()
     last_score = self.state.score()
     # Apply the action to the state.
     self.state.apply_move(action)
@@ -361,6 +362,18 @@ class HanabiEnv(Environment):
     done = self.state.is_terminal()
     # Reward is score differential. May be large and negative at game end.
     reward = self.state.score() - last_score
+    # print(action.type())
+    # if pyhanabi.HanabiMoveType(3) == action.type() or pyhanabi.HanabiMoveType(4) == action.type(): # if it's new information, then small reward
+    #   if observation["player_observations"][observation['current_player']]['card_knowledge'] != old_observation["player_observations"][old_observation['current_player']]['card_knowledge'] :
+    #     reward = 0.2
+    #   else:
+    #     reward = -0.2
+    # elif pyhanabi.HanabiMoveType(1) == action.type():
+    #   if observation["player_observations"][observation['current_player']]['life_tokens'] != old_observation["player_observations"][old_observation['current_player']]['life_tokens']:
+    #     reward = -1
+    if pyhanabi.HanabiMoveType(1) == action.type():
+      if observation["player_observations"][observation['current_player']]['life_tokens'] != old_observation["player_observations"][old_observation['current_player']]['life_tokens']:
+        reward = -1
     info = {}
 
     return (observation, reward, done, info)
@@ -532,6 +545,22 @@ def make(environment_name="Hanabi-Full", num_players=2, pyhanabi_path=None):
                 8,
             "max_life_tokens":
                 3,
+            "observation_type":
+                pyhanabi.AgentObservationType.CARD_KNOWLEDGE.value
+        })
+  elif (environment_name == "Hanabi-Inf"):
+    return HanabiEnv(
+        config={
+            "colors":
+                5,
+            "ranks":
+                5,
+            "players":
+                num_players,
+            "max_information_tokens":
+                8,
+            "max_life_tokens":
+                100,
             "observation_type":
                 pyhanabi.AgentObservationType.CARD_KNOWLEDGE.value
         })

@@ -2,7 +2,6 @@ import getopt
 import sys
 import random
 import numpy as np
-import hanabi_learning_environment
 import pickle
 import copy
 from collections import deque
@@ -56,17 +55,19 @@ class QLearningAgent:
 
         self.Q[(observation_id, action_id)] = new_q
 
-    def select_action(self, observation, Q_network, epsilon=0.0):
+    def select_action(self, observation, Q_network, input_data_size, epsilon=0.0):
         curr_player_index = observation["current_player"]
         # Select action based on epsilon-greedy strategy
         if np.random.rand() < epsilon:
             # Exploration: choose a random action
             legal_actions = observation["player_observations"][curr_player_index]["legal_moves"]
-            return np.random.choice(len(legal_actions))
+            return np.random.choice(len(legal_actions)), True
         else:
             # Exploitation: choose the best action (max Q-value)
             input_data = np.expand_dims(np.array(observation["player_observations"][curr_player_index]["vectorized"]),axis=0)
-            input_data = input_data.reshape(-1, 1, 658)  # Adding a sequence dimension
+            # input_data = input_data.reshape(-1, 1, 755)  # Adding a sequence dimension
+            input_data = input_data.reshape(-1, 1, input_data_size)  # Adding a sequence dimension
+
 
             Q_values = Q_network.predict(input_data)  # Predict Q-values for all actions
             #action = int(np.argmax(Q_values))  # Choose the action with the highest Q-value
@@ -79,7 +80,7 @@ class QLearningAgent:
                     action_index = observation["player_observations"][curr_player_index]["legal_moves_as_int"].index(action)
                     #print(np.expand_dims(np.array(observation["player_observations"][curr_player_index]["vectorized"]),axis=0).shape)
                     action_index = observation["player_observations"][curr_player_index]["legal_moves_as_int"].index(action)
-                    return action_index, epsilon
+                    return action_index, False
             print("something's not right")
 
 
@@ -120,25 +121,28 @@ def initialize_network(input_shape, output_size):
     return model
 
 
-def train_agent(environment, agent, n_episodes=1000, num_players=2, print_legal_moves=False):
+def train_agent(environment, agent, input_data_size, n_episodes=1000, num_players=2, print_legal_moves=False):
     max_reward = 0
-    gamma = 0.99
+    gamma = 0.1
     batch_size = 64
     buffer_size = 100  # Example size, adjust as needed
     target_update_frequency = 1000
-    epsilon = 0.8
+    epsilon = 1
     epsilon_min = 0.1
-    epsilon_decay = 0.5
+    epsilon_decay = 0.95
     replay_buffer = deque(maxlen=buffer_size)  # Fixed-size replay buffer
-    Q_networks = [initialize_network((1, 658), environment.num_moves()) for _ in range(num_players)]
+    # Q_networks = [initialize_network((1, 755), environment.num_moves()) for _ in range(num_players)]
+    Q_networks = [initialize_network((1, input_data_size), environment.num_moves()) for _ in range(num_players)]
+
     target_networks = [copy.deepcopy(Q_networks[0]) for _ in range(num_players)]
+    total_rewards = []
 
     for episode in range(n_episodes):
         # Reset the environment and initialize variables for this episode
         observation = environment.reset()  # Initial observation
         total_reward = 0
         done = False
-
+        score = 0
         while not done:
             for player_index in range(num_players):
                 agent = agents[player_index]
@@ -146,7 +150,7 @@ def train_agent(environment, agent, n_episodes=1000, num_players=2, print_legal_
                 target_network = target_networks[player_index]
                 cur_player_index = observation["current_player"]
                 if observation["player_observations"][player_index]["current_player_offset"] == 0: # play only when it is a player's turn
-                    action_index, eps_true = agent.select_action(observation, Q_network)
+                    action_index, eps_true = agent.select_action(observation, Q_network,input_data_size, epsilon=epsilon)
                     action = observation["player_observations"][cur_player_index]["legal_moves"][action_index]
                     # print(f"Player {player_index+1}, epsiloned: {eps_true},action: {action}")
 
@@ -157,7 +161,8 @@ def train_agent(environment, agent, n_episodes=1000, num_players=2, print_legal_
 
                     # Apply action to the environment and get next observation, reward, and done signal
                     next_observation, reward, done, _ = environment.step(action)
-                    # print(f"reward: {reward}")
+                    score = max(score, environment.state.score())
+                    # print(f"reward: {reward}")    
                     replay_buffer.append((observation['player_observations'][cur_player_index]['vectorized'], 
                                           observation['player_observations'][cur_player_index]['legal_moves_as_int'][action_index], 
                                           reward, 
@@ -170,26 +175,15 @@ def train_agent(environment, agent, n_episodes=1000, num_players=2, print_legal_
                         
                         # Compute target Q-values for the mini-batch
                         states = np.array(next_observations)
-                        # next_Q_values = target_network.predict(np.expand_dims(np.array(states), axis=0))
                         next_Q_values = target_network.predict(np.expand_dims(np.array(states),axis=1))
-
-                        # print(next_Q_values.shape)
-                        # max_next_Q_values = np.max(next_Q_values, axis=2)  # Shape (64,)
-                        # print(max_next_Q_values.shape)
-                        # print(np.array(dones).shape)
-                        # print(np.array(rewards).shape)
                         target_Q_values = np.array(rewards).reshape(-1,1) + gamma * np.max(next_Q_values, axis=2) * (1 - np.array(dones).reshape(-1,1))
-                        # print(target_Q_values.shape)
                         target_Q_values_one_hot = np.zeros((64, 20))
 
                         # For each observation, set the Q-value for the selected action
                         for i in range(64):
                             target_Q_values_one_hot[i, actions[i]] = target_Q_values[i]  # Replace with the target Q-value for the selected action
-                        # print(np.expand_dims(np.array(observations), axis=0).shape)
-                        # print(np.array(observations).shape)
                         Q_network.train_on_batch(np.expand_dims(np.array(observations), axis=0), target_Q_values_one_hot)
                     # Update Q-table based on the agent's experience
-                    #agent.update_q(observation, action_index, reward, next_observation)
                     if episode % target_update_frequency == 0:
                         target_networks[player_index].set_weights(Q_network.get_weights())
                     
@@ -199,14 +193,15 @@ def train_agent(environment, agent, n_episodes=1000, num_players=2, print_legal_
                     # Move to the next state
                     observation = next_observation
                     total_reward += reward
-        if max_reward < total_reward:
-            max_reward = total_reward         
+        total_rewards.append(total_reward)
+        # scores.append(score)    
         print(f"Episode {episode+1}/{n_episodes}, Total Reward: {total_reward}")
     print(max_reward)
-    return Q_networks
+    return Q_networks, [total_rewards]
 
-def evaluate_agent(environment, agents, target_networks, n_episodes=100, num_players=2, epsilon=0.0, print_legal_moves=False):
-    total_rewards = []
+def evaluate_agent(environment, agents, input_data_size, target_networks, n_episodes=100, num_players=2, epsilon=0.0, print_legal_moves=False):
+    total_rewards = [[], []]
+    scores = []
 
     # Set epsilon to 0 for evaluation (no exploration)
 
@@ -214,6 +209,7 @@ def evaluate_agent(environment, agents, target_networks, n_episodes=100, num_pla
         # Reset the environment and initialize variables for this episode
         observation = environment.reset()  # Initial observation
         total_reward = 0
+        score = 0
         done = False
         
         while not done:
@@ -224,9 +220,13 @@ def evaluate_agent(environment, agents, target_networks, n_episodes=100, num_pla
                     Q_network = target_networks[player_index]
 
                     # Choose the best action (greedy action) based on Q-values
-                    action_index, eps_true = agent.select_action(observation, Q_network)
+                    action_index, eps_true = agent.select_action(observation, Q_network, input_data_size)
                     action = observation["player_observations"][cur_player_index]["legal_moves"][action_index]
-
+                    print(f"action:{action}")
+                    # print(observation["player_observations"][cur_player_index]['card_knowledge'])
+                    # print("observed cards:")
+                    # for card in observation['player_observations'][cur_player_index]['observed_hands']:
+                    #     print(card)
                     if print_legal_moves:
                         print(f"Legal actions:")
                         for act in observation['player_observations'][cur_player_index]['legal_moves']:
@@ -234,6 +234,8 @@ def evaluate_agent(environment, agents, target_networks, n_episodes=100, num_pla
 
                     # Apply action to the environment and get next observation, reward, and done signal
                     next_observation, reward, done, _ = environment.step(action)
+                    # print(f"reward:{reward}")
+                    score = max(environment.state.score(), score)
 
                     # Update total reward for this episode
                     total_reward += reward
@@ -242,34 +244,122 @@ def evaluate_agent(environment, agents, target_networks, n_episodes=100, num_pla
                     observation = next_observation
 
         total_rewards.append(total_reward)
-        print(f"Evaluation Episode {episode + 1}/{n_episodes}, Total Reward: {total_reward}")
+        scores.append(score)
+        print(f"Evaluation Episode {episode + 1}/{n_episodes}, Total Reward: {total_reward}, Total Score: {score}")
 
     # Calculate the average reward across all episodes
-    avg_reward = np.mean(total_rewards)
-    print(f"Average Reward over {n_episodes} evaluation episodes: {avg_reward}")
+    avg_score = np.mean(scores)
+    print(f"Average Score over {n_episodes} evaluation episodes: {avg_score}")
 
-    return avg_reward
+    return scores
+
+import matplotlib.pyplot as plt
+
+def generate_graphs(training_scores, agent_labels=["Lorem 1", "Ipsum 2", "Dolor 3"], scores=[[20, 22, 19, 23, 25, 21, 24],[18, 20, 19, 21, 22, 20, 19],[15, 17, 16, 18, 14, 16, 19]]):
+    ### Agent Evaluation Histogram
+    for score_list in scores:
+        # bins = list(range(27))  # 0-26 for edges to include 25 bins
+        bins = np.arange(start=0, stop=2, step=0.2)
+        plt.hist(score_list, bins=bins, edgecolor='black', align='left')
+
+        plt.xlabel('Points Scored')
+        plt.ylabel('Frequency')
+
+        plt.title('Agent Performance over 100 Evaluation Games')
+
+        plt.show()
+
+    ### Performance Box Plots
+    plt.figure(figsize=(8, 6))
+    plt.boxplot(scores, labels=agent_labels, patch_artist=True)
+
+    plt.title("Agent Performance Comparison", fontsize=14)
+    plt.xlabel("Configuration", fontsize=12)
+    plt.ylabel("Score", fontsize=12)
+
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.show()
+
+    ### Model Training Graph
+    episodes = np.arange(1, 1001)
+    plt.figure(figsize=(10, 6))
+    plt.plot(episodes, training_scores[0], label='Score', color='b')
+    plt.plot(episodes, training_scores[1], label='Score', color='b')
+
+
+    plt.xlabel('Episode')
+    plt.ylabel('Score')
+    plt.ylim(0, 12)  # Limit the y-axis from 0 to 25
+    plt.xlim(1, 200)  # Limit the x-axis from 1 to 1000
+
+    plt.grid(True)
+    plt.show()
+
 
 if __name__ == "__main__":
 
     num_players = 2
-    n_episodes = 100
+    n_episodes = 200
 
+    # -------------------------- TRAINING FOR FULL ----------------------------------------
+    
+    picklename = 'Qs_full_final.pkl'
     environment = rl_env.make('Hanabi-Full', num_players=num_players)
-    initial_state = environment.reset()
-    agents = [QLearningAgent(epsilon=0.1) for _ in range(num_players)]
 
-    #print(f"Q table at beginning: {agents[0].Q}")
+    # initial_state = environment.reset()
+    # agents = [QLearningAgent(epsilon=0.1) for _ in range(num_players)]
+    # Q_networks, training_scores = train_agent(environment, agents, input_data_size=658, n_episodes=n_episodes, num_players=num_players)
+    # with open(picklename,'wb') as file:
+    #     pickle.dump(Q_networks, file)
+    # with open("training_scores_final.pkl", 'wb') as file:
+    #     pickle.dump(training_scores, file)
 
-    Q_networks = train_agent(environment, agents, n_episodes=n_episodes, num_players=num_players)
-    picklename = 'Qs_eps_'+str(n_episodes)+'_players_'+str(num_players)+'.pkl'
-    with open(picklename,'wb') as file:
-        pickle.dump(Q_networks, file)
+    # -------------------------- EVALUATION FOR FULL -----------------------------------------
 
+    training_scores1 = None
+    with open("training_scores_final.pkl", 'rb') as file:
+        training_scores1 = pickle.load(file)
     Q_networks = None
     with open(picklename, 'rb') as file:
         Q_networks = pickle.load(file)
-    # #print(f"Q table at end: {agents[0].Q}")
     newagents = [QLearningAgent(epsilon=0) for _ in range(num_players)]
+    scores1 = evaluate_agent(environment, newagents, 658, Q_networks, num_players=num_players, n_episodes=20)
+    
 
-    evaluate_agent(environment, newagents, Q_networks, num_players=num_players, n_episodes=20)
+    # --------------------------- TRAINING FOR INF -------------------------------------------
+
+    picklename = 'Qs_inflife_final.pkl'
+    environment = rl_env.make('Hanabi-Inf', num_players=num_players)
+
+    # initial_state = environment.reset()
+    # agents = [QLearningAgent(epsilon=0.1) for _ in range(num_players)]
+    # Q_networks, training_scores = train_agent(environment, agents, input_data_size=755, n_episodes=n_episodes, num_players=num_players)
+    # with open(picklename,'wb') as file:
+    #     pickle.dump(Q_networks, file)
+    # with open("training_scores_final_inf.pkl", 'wb') as file:
+    #     pickle.dump(training_scores, file)
+
+    # --------------------------- EVALUATION FOR INF ------------------------------------------
+    training_scores2 = None
+    with open("training_scores_final_inf.pkl", 'rb') as file:
+        training_scores2 = pickle.load(file)
+    Q_networks = None
+    with open(picklename, 'rb') as file:
+        Q_networks = pickle.load(file)
+    newagents = [QLearningAgent(epsilon=0) for _ in range(num_players)]
+    scores2 = evaluate_agent(environment, newagents, 755, Q_networks, num_players=num_players, n_episodes=20)
+    
+    # ----------------------------- GENERATE GRAPH --------------------------------------------
+    
+    scores = [scores1, scores2]
+    print(scores2)
+    generate_graphs(training_scores=[training_scores1, training_scores2], agent_labels=['Hanabi-Full, 100 Epochs', 'Hanabi-Inf, 100 Epochs'], scores=scores)
+
+    # 1. Bar graph of EVALUATION SCORES (not rewards) between
+
+    # 2. Box plot of EVALUATION SCORES (not rewards)
+
+    # 3. Line graph of TRAINING REWARDS
+    # Have 2 DIFFERENT ones
+    # - One for FULL
+    # - One for INF
