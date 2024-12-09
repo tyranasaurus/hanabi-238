@@ -114,10 +114,10 @@ def evaluate_agent(environment, agent, n_episodes=100):
 if __name__ == "__main__":
 	flags = {'players': 2, 'num_episodes': 1, 'agent_class': 'SimpleAgent'}
 	options, arguments = getopt.getopt(sys.argv[1:], '',['players=','num_episodes=','agent_class='])
-	environment = rl_env.make('Hanabi-Full')
+	environment = rl_env.make('Hanabi-Full', num_players=3)
 	# initial_state = environment.reset()
 	agent = QLearningAgent()
-	train_agent(environment, agent, n_episodes=10000)
+	train_agent(environment, agent, n_episodes=100)
 	evaluate_agent(environment, agent, n_episodes=100)
 
 

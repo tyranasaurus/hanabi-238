@@ -46,6 +46,7 @@ class Runner(object):
       while not done:
         for agent_id, agent in enumerate(agents):
           observation = observations['player_observations'][agent_id]
+          print(observation['current_player'])
           action = agent.act(observation)
           if observation['current_player'] == agent_id:
             assert action is not None
@@ -64,7 +65,7 @@ class Runner(object):
     return rewards
 
 if __name__ == "__main__":
-  flags = {'players': 2, 'num_episodes': 1, 'agent_class': 'SimpleAgent'}
+  flags = {'players': 2, 'num_episodes': 1, 'agent_class': 'RandomAgent'}
   options, arguments = getopt.getopt(sys.argv[1:], '',
                                      ['players=',
                                       'num_episodes=',
